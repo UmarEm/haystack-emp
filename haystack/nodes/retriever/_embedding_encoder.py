@@ -13,7 +13,8 @@ except ImportError:
 import numpy as np
 import requests
 import torch
-from sentence_transformers import InputExample
+from sentence_transformers import InputExample, SentenceTransformer
+from sentence_transformers.models import Transformer
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler
 from tqdm.auto import tqdm
@@ -118,13 +119,6 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
     def __init__(self, retriever: "EmbeddingRetriever"):
         # pretrained embedding models coming from: https://github.com/UKPLab/sentence-transformers#pretrained-models
         # e.g. 'roberta-base-nli-stsb-mean-tokens'
-        try:
-            from sentence_transformers import SentenceTransformer
-        except (ImportError, ModuleNotFoundError) as ie:
-            from haystack.utils.import_utils import _optional_component_not_installed
-
-            _optional_component_not_installed(__name__, "sentence", ie)
-
         self.embedding_model = SentenceTransformer(
             retriever.embedding_model, device=str(retriever.devices[0]), use_auth_token=retriever.use_auth_token
         )
@@ -205,13 +199,6 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
             for a full list of keyword arguments.
         """
         send_event(event_name="Training", event_properties={"class": self.__class__.__name__, "function_name": "train"})
-
-        try:
-            from sentence_transformers.models import Transformer
-        except (ImportError, ModuleNotFoundError) as ie:
-            from haystack.utils.import_utils import _optional_component_not_installed
-
-            _optional_component_not_installed(__name__, "sentence", ie)
 
         if gradient_checkpointing:
             # Loop over nn.Modules that make up a Sentence Transformers model

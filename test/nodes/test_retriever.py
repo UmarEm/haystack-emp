@@ -541,7 +541,6 @@ def test_table_text_retriever_embedding_only_table(document_store, retriever):
     document_store.update_embeddings(retriever)
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize("retriever", ["dpr"], indirect=True)
 @pytest.mark.parametrize("document_store", ["memory"], indirect=True)
 def test_dpr_saving_and_loading(tmp_path, retriever, document_store):
@@ -588,7 +587,6 @@ def test_dpr_saving_and_loading(tmp_path, retriever, document_store):
     assert loaded_retriever.query_tokenizer.vocab_size == 30522
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize("retriever", ["table_text_retriever"], indirect=True)
 @pytest.mark.embedding_dim(512)
 def test_table_text_retriever_saving_and_loading(tmp_path, retriever, document_store):
@@ -635,7 +633,6 @@ def test_table_text_retriever_saving_and_loading(tmp_path, retriever, document_s
     assert loaded_retriever.query_tokenizer.vocab_size == 30522
 
 
-@pytest.mark.integration
 @pytest.mark.embedding_dim(128)
 def test_table_text_retriever_training(tmp_path, document_store, samples_path):
     retriever = TableTextRetriever(
@@ -660,7 +657,6 @@ def test_table_text_retriever_training(tmp_path, document_store, samples_path):
     )
 
 
-@pytest.mark.integration
 def test_sentence_transformers_retriever_training():
     retriever = EmbeddingRetriever(
         embedding_model="sentence-transformers/all-MiniLM-L6-v2", model_format="sentence_transformers", use_gpu=False
@@ -685,7 +681,6 @@ def test_sentence_transformers_retriever_training():
     )
 
 
-@pytest.mark.integration
 def test_sentence_transformers_retriever_training_with_gradient_checkpointing():
     retriever = EmbeddingRetriever(
         embedding_model="sentence-transformers/all-MiniLM-L6-v2", model_format="sentence_transformers", use_gpu=False
@@ -711,7 +706,6 @@ def test_sentence_transformers_retriever_training_with_gradient_checkpointing():
     )
 
 
-@pytest.mark.integration
 @pytest.mark.elasticsearch
 def test_elasticsearch_highlight():
     client = Elasticsearch()
@@ -832,7 +826,6 @@ def test_elasticsearch_highlight():
     assert results[0].meta["highlighted"]["title"] == ["**Green**", "**tea** components"]
 
 
-@pytest.mark.integration
 def test_elasticsearch_filter_must_not_increase_results():
     index = "filter_must_not_increase_results"
     client = Elasticsearch()
@@ -868,7 +861,6 @@ def test_elasticsearch_filter_must_not_increase_results():
     doc_store.delete_index(index)
 
 
-@pytest.mark.integration
 def test_elasticsearch_all_terms_must_match():
     index = "all_terms_must_match"
     client = Elasticsearch()
@@ -904,7 +896,6 @@ def test_elasticsearch_all_terms_must_match():
     doc_store.delete_index(index)
 
 
-@pytest.mark.integration
 @pytest.mark.elasticsearch
 def test_bm25retriever_all_terms_must_match():
     index = "all_terms_must_match"
@@ -946,7 +937,6 @@ def test_bm25retriever_all_terms_must_match():
     doc_store.delete_index(index)
 
 
-@pytest.mark.integration
 def test_embeddings_encoder_of_embedding_retriever_should_warn_about_model_format(caplog):
     document_store = InMemoryDocumentStore()
 
@@ -963,7 +953,6 @@ def test_embeddings_encoder_of_embedding_retriever_should_warn_about_model_forma
         )
 
 
-@pytest.mark.integration
 @pytest.mark.parametrize("retriever", ["es_filter_only"], indirect=True)
 @pytest.mark.parametrize("document_store", ["elasticsearch"], indirect=True)
 def test_es_filter_only(document_store, retriever):
