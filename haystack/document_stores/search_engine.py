@@ -21,7 +21,6 @@ from haystack.errors import DocumentStoreError, HaystackError
 from haystack.nodes.retriever import DenseRetriever
 from haystack.utils.scipy_utils import expit
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -48,28 +47,28 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
     """
 
     def __init__(
-        self,
-        client: Any,
-        index: str = "document",
-        label_index: str = "label",
-        search_fields: Union[str, list] = "content",
-        content_field: str = "content",
-        name_field: str = "name",
-        embedding_field: str = "embedding",
-        embedding_dim: int = 768,
-        custom_mapping: Optional[dict] = None,
-        excluded_meta_data: Optional[list] = None,
-        analyzer: str = "standard",
-        recreate_index: bool = False,
-        create_index: bool = True,
-        refresh_type: str = "wait_for",
-        similarity: str = "dot_product",
-        return_embedding: bool = False,
-        duplicate_documents: str = "overwrite",
-        scroll: str = "1d",
-        skip_missing_embeddings: bool = True,
-        synonyms: Optional[List] = None,
-        synonym_type: str = "synonym",
+            self,
+            client: Any,
+            index: str = "document",
+            label_index: str = "label",
+            search_fields: Union[str, list] = "content",
+            content_field: str = "content",
+            name_field: str = "name",
+            embedding_field: str = "embedding",
+            embedding_dim: int = 768,
+            custom_mapping: Optional[dict] = None,
+            excluded_meta_data: Optional[list] = None,
+            analyzer: str = "standard",
+            recreate_index: bool = False,
+            create_index: bool = True,
+            refresh_type: str = "wait_for",
+            similarity: str = "dot_product",
+            return_embedding: bool = False,
+            duplicate_documents: str = "overwrite",
+            scroll: str = "1d",
+            skip_missing_embeddings: bool = True,
+            synonyms: Optional[List] = None,
+            synonym_type: str = "synonym",
     ):
         super().__init__()
 
@@ -126,11 +125,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             self._create_label_index(label_index)
 
     def _split_document_list(
-        self, documents: Union[List[dict], List[Document]], number_of_lists: int
+            self, documents: Union[List[dict], List[Document]], number_of_lists: int
     ) -> Generator[Union[List[dict], List[Document]], None, None]:
         chunk_size = max((len(documents) + 1) // number_of_lists, 1)
         for i in range(0, len(documents), chunk_size):
-            yield documents[i : i + chunk_size]
+            yield documents[i: i + chunk_size]
 
     @abstractmethod
     def _do_bulk(self, *args, **kwargs):
@@ -142,14 +141,14 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
 
     @abstractmethod
     def query_by_embedding(
-        self,
-        query_emb: np.ndarray,
-        filters: Optional[FilterType] = None,
-        top_k: int = 10,
-        index: Optional[str] = None,
-        return_embedding: Optional[bool] = None,
-        headers: Optional[Dict[str, str]] = None,
-        scale_score: bool = True,
+            self,
+            query_emb: np.ndarray,
+            filters: Optional[FilterType] = None,
+            top_k: int = 10,
+            index: Optional[str] = None,
+            return_embedding: Optional[bool] = None,
+            headers: Optional[Dict[str, str]] = None,
+            scale_score: bool = True,
     ) -> List[Document]:
         pass
 
@@ -181,13 +180,13 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         pass
 
     def _bulk(
-        self,
-        documents: Union[List[dict], List[Document]],
-        headers: Optional[Dict[str, str]] = None,
-        request_timeout: int = 300,
-        refresh: str = "wait_for",
-        _timeout: int = 1,
-        _remaining_tries: int = 10,
+            self,
+            documents: Union[List[dict], List[Document]],
+            headers: Optional[Dict[str, str]] = None,
+            request_timeout: int = 300,
+            refresh: str = "wait_for",
+            _timeout: int = 1,
+            _remaining_tries: int = 10,
     ) -> None:
         """
         Bulk index documents using a custom retry logic with
@@ -244,7 +243,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return {self.content_field: "content", self.embedding_field: "embedding"}
 
     def get_document_by_id(
-        self, id: str, index: Optional[str] = None, headers: Optional[Dict[str, str]] = None
+            self, id: str, index: Optional[str] = None, headers: Optional[Dict[str, str]] = None
     ) -> Optional[Document]:
         """Fetch a document by specifying its text id string"""
         index = index or self.index
@@ -255,11 +254,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             return None
 
     def get_documents_by_id(
-        self,
-        ids: List[str],
-        index: Optional[str] = None,
-        batch_size: int = 10_000,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            ids: List[str],
+            index: Optional[str] = None,
+            batch_size: int = 10_000,
+            headers: Optional[Dict[str, str]] = None,
     ) -> List[Document]:
         """
         Fetch documents by specifying a list of text id strings.
@@ -277,7 +276,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         index = index or self.index
         documents = []
         for i in range(0, len(ids), batch_size):
-            ids_for_batch = ids[i : i + batch_size]
+            ids_for_batch = ids[i: i + batch_size]
             query = {"size": len(ids_for_batch), "query": {"ids": {"values": ids_for_batch}}}
             if not self.return_embedding and self.embedding_field:
                 query["_source"] = {"excludes": [self.embedding_field]}
@@ -286,12 +285,12 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return documents
 
     def get_metadata_values_by_key(
-        self,
-        key: str,
-        query: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        index: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            key: str,
+            query: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            index: Optional[str] = None,
+            headers: Optional[Dict[str, str]] = None,
     ) -> List[dict]:
         """
         Get values associated with a metadata key. The output is in the format:
@@ -364,12 +363,12 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return values
 
     def write_documents(
-        self,
-        documents: Union[List[dict], List[Document]],
-        index: Optional[str] = None,
-        batch_size: int = 10_000,
-        duplicate_documents: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            documents: Union[List[dict], List[Document]],
+            index: Optional[str] = None,
+            batch_size: int = 10_000,
+            duplicate_documents: Optional[str] = None,
+            headers: Optional[Dict[str, str]] = None,
     ):
         """
         Indexes documents for later queries.
@@ -409,7 +408,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             index = self.index
         duplicate_documents = duplicate_documents or self.duplicate_documents
         assert (
-            duplicate_documents in self.duplicate_documents_options
+                duplicate_documents in self.duplicate_documents_options
         ), f"duplicate_documents parameter must be {', '.join(self.duplicate_documents_options)}"
 
         field_map = self._create_document_field_map()
@@ -454,11 +453,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             self._bulk(documents_to_index, request_timeout=300, refresh=self.refresh_type, headers=headers)
 
     def write_labels(
-        self,
-        labels: Union[List[Label], List[dict]],
-        index: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
-        batch_size: int = 10_000,
+            self,
+            labels: Union[List[Label], List[dict]],
+            index: Optional[str] = None,
+            headers: Optional[Dict[str, str]] = None,
+            batch_size: int = 10_000,
     ):
         """Write annotation labels into document store.
 
@@ -513,7 +512,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             self._bulk(labels_to_index, request_timeout=300, refresh=self.refresh_type, headers=headers)
 
     def update_document_meta(
-        self, id: str, meta: Dict[str, str], index: Optional[str] = None, headers: Optional[Dict[str, str]] = None
+            self, id: str, meta: Dict[str, str], index: Optional[str] = None, headers: Optional[Dict[str, str]] = None
     ):
         """
         Update the metadata dictionary of a document by specifying its string id
@@ -524,11 +523,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         self.client.update(index=index, id=id, **body, refresh=self.refresh_type, headers=headers)
 
     def get_document_count(
-        self,
-        filters: Optional[FilterType] = None,
-        index: Optional[str] = None,
-        only_documents_without_embedding: bool = False,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            filters: Optional[FilterType] = None,
+            index: Optional[str] = None,
+            only_documents_without_embedding: bool = False,
+            headers: Optional[Dict[str, str]] = None,
     ) -> int:
         """
         Return the number of documents in the document store.
@@ -554,10 +553,10 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return self.get_document_count(index=index, headers=headers)
 
     def get_embedding_count(
-        self,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            headers: Optional[Dict[str, str]] = None,
     ) -> int:
         """
         Return the count of embeddings in the document store.
@@ -574,12 +573,12 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return count
 
     def get_all_documents(
-        self,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        return_embedding: Optional[bool] = None,
-        batch_size: int = 10_000,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            return_embedding: Optional[bool] = None,
+            batch_size: int = 10_000,
+            headers: Optional[Dict[str, str]] = None,
     ) -> List[Document]:
         """
         Get documents from the document store.
@@ -624,12 +623,12 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return documents
 
     def get_all_documents_generator(
-        self,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        return_embedding: Optional[bool] = None,
-        batch_size: int = 10_000,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            return_embedding: Optional[bool] = None,
+            batch_size: int = 10_000,
+            headers: Optional[Dict[str, str]] = None,
     ) -> Generator[Document, None, None]:
         """
         Get documents from the document store. Under-the-hood, documents are fetched in batches from the
@@ -688,11 +687,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             yield document
 
     def get_all_labels(
-        self,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        headers: Optional[Dict[str, str]] = None,
-        batch_size: int = 10_000,
+            self,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            headers: Optional[Dict[str, str]] = None,
+            batch_size: int = 10_000,
     ) -> List[Label]:
         """
         Return all labels in the document store
@@ -710,13 +709,13 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return labels
 
     def _get_all_documents_in_index(
-        self,
-        index: str,
-        filters: Optional[FilterType] = None,
-        batch_size: int = 10_000,
-        only_documents_without_embedding: bool = False,
-        headers: Optional[Dict[str, str]] = None,
-        excludes: Optional[List[str]] = None,
+            self,
+            index: str,
+            filters: Optional[FilterType] = None,
+            batch_size: int = 10_000,
+            only_documents_without_embedding: bool = False,
+            headers: Optional[Dict[str, str]] = None,
+            excludes: Optional[List[str]] = None,
     ) -> Generator[dict, None, None]:
         """
         Return all documents in a specific index in the document store
@@ -738,15 +737,15 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         yield from result
 
     def query(
-        self,
-        query: Optional[str],
-        filters: Optional[FilterType] = None,
-        top_k: int = 10,
-        custom_query: Optional[str] = None,
-        index: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
-        all_terms_must_match: bool = False,
-        scale_score: bool = True,
+            self,
+            query: Optional[str],
+            filters: Optional[FilterType] = None,
+            top_k: int = 10,
+            custom_query: Optional[str] = None,
+            index: Optional[str] = None,
+            headers: Optional[Dict[str, str]] = None,
+            all_terms_must_match: bool = False,
+            scale_score: bool = True,
     ) -> List[Document]:
         """
         Scan through documents in DocumentStore and return a small number documents
@@ -914,15 +913,15 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return documents
 
     def query_batch(
-        self,
-        queries: List[str],
-        filters: Optional[Union[FilterType, List[Optional[FilterType]]]] = None,
-        top_k: int = 10,
-        custom_query: Optional[str] = None,
-        index: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
-        all_terms_must_match: bool = False,
-        scale_score: bool = True,
+            self,
+            queries: List[str],
+            filters: Optional[Union[FilterType, List[Optional[FilterType]]]] = None,
+            top_k: int = 10,
+            custom_query: Optional[str] = None,
+            index: Optional[str] = None,
+            headers: Optional[Dict[str, str]] = None,
+            all_terms_must_match: bool = False,
+            scale_score: bool = True,
     ) -> List[List[Document]]:
         """
         Scan through documents in DocumentStore and return a small number documents
@@ -1050,12 +1049,12 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return all_documents
 
     def _construct_query_body(
-        self,
-        query: Optional[str],
-        filters: Optional[FilterType],
-        top_k: int,
-        custom_query: Optional[str],
-        all_terms_must_match: bool,
+            self,
+            query: Optional[str],
+            filters: Optional[FilterType],
+            top_k: int,
+            custom_query: Optional[str],
+            all_terms_must_match: bool,
     ) -> Dict[str, Any]:
         # Naive retrieval without BM25, only filtering
         if query is None:
@@ -1131,7 +1130,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return excluded_meta_data
 
     def _convert_es_hit_to_document(
-        self, hit: dict, adapt_score_for_embedding: bool = False, scale_score: bool = True
+            self, hit: dict, adapt_score_for_embedding: bool = False, scale_score: bool = True
     ) -> Document:
         # We put all additional data of the doc into meta_data and return it in the API
         try:
@@ -1180,14 +1179,15 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return document
 
     def query_by_embedding_batch(
-        self,
-        query_embs: Union[List[np.ndarray], np.ndarray],
-        filters: Optional[Union[FilterType, List[Optional[FilterType]]]] = None,
-        top_k: int = 10,
-        index: Optional[str] = None,
-        return_embedding: Optional[bool] = None,
-        headers: Optional[Dict[str, str]] = None,
-        scale_score: bool = True,
+            self,
+            query_embs: Union[List[np.ndarray], np.ndarray],
+            filters: Optional[Union[FilterType, List[Optional[FilterType]]]] = None,
+            top_k: int = 10,
+            index: Optional[str] = None,
+            return_embedding: Optional[bool] = None,
+            headers: Optional[Dict[str, str]] = None,
+            es_query: Optional[Dict[str, str]] = None,
+            scale_score: bool = True,
     ) -> List[List[Document]]:
         """
         Find the documents that are most similar to the provided `query_embs` by using a vector similarity metric.
@@ -1262,6 +1262,7 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         :param return_embedding: To return document embedding
         :param headers: Custom HTTP headers to pass to elasticsearch client (e.g. {'Authorization': 'Basic YWRtaW46cm9vdA=='})
                 Check out https://www.elastic.co/guide/en/elasticsearch/reference/current/http-clients.html for more information.
+        :param es_query: Custom Elasticsearch Query
         :param scale_score: Whether to scale the similarity score to the unit interval (range of [0,1]).
                             If true (default) similarity scores (e.g. cosine or dot_product) which naturally have a different value range will be scaled to a range of [0,1], where 1 means extremely relevant.
                             Otherwise raw similarity scores (e.g. cosine or dot_product) will be used.
@@ -1291,7 +1292,8 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         body = []
         for query_emb, cur_filters in zip(query_embs, filters):
             cur_query_body = self._construct_dense_query_body(
-                query_emb=query_emb, filters=cur_filters, top_k=top_k, return_embedding=return_embedding
+                query_emb=query_emb, filters=cur_filters, top_k=top_k, return_embedding=return_embedding,
+                es_query=es_query
             )
             body.append(headers)
             body.append(cur_query_body)
@@ -1313,18 +1315,19 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
 
     @abstractmethod
     def _construct_dense_query_body(
-        self, query_emb: np.ndarray, return_embedding: bool, filters: Optional[FilterType] = None, top_k: int = 10
+            self, query_emb: np.ndarray, return_embedding: bool, es_query: dict, filters: Optional[FilterType] = None,
+            top_k: int = 10
     ):
         pass
 
     def update_embeddings(
-        self,
-        retriever: DenseRetriever,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        update_existing_embeddings: bool = True,
-        batch_size: int = 10_000,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            retriever: DenseRetriever,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            update_existing_embeddings: bool = True,
+            batch_size: int = 10_000,
+            headers: Optional[Dict[str, str]] = None,
     ):
         """
         Updates the embeddings in the the document store using the encoding model specified in the retriever.
@@ -1433,10 +1436,10 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         return embeddings
 
     def delete_all_documents(
-        self,
-        index: Optional[str] = None,
-        filters: Optional[FilterType] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            filters: Optional[FilterType] = None,
+            headers: Optional[Dict[str, str]] = None,
     ):
         """
         Delete documents in an index. All documents are deleted if no filters are passed.
@@ -1481,11 +1484,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
         self.delete_documents(index, None, filters, headers=headers)
 
     def delete_documents(
-        self,
-        index: Optional[str] = None,
-        ids: Optional[List[str]] = None,
-        filters: Optional[FilterType] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            ids: Optional[List[str]] = None,
+            filters: Optional[FilterType] = None,
+            headers: Optional[Dict[str, str]] = None,
     ):
         """
         Delete documents in an index. All documents are deleted if no filters are passed.
@@ -1545,11 +1548,11 @@ class SearchEngineDocumentStore(KeywordDocumentStore):
             self.client.indices.refresh(index=index)
 
     def delete_labels(
-        self,
-        index: Optional[str] = None,
-        ids: Optional[List[str]] = None,
-        filters: Optional[FilterType] = None,
-        headers: Optional[Dict[str, str]] = None,
+            self,
+            index: Optional[str] = None,
+            ids: Optional[List[str]] = None,
+            filters: Optional[FilterType] = None,
+            headers: Optional[Dict[str, str]] = None,
     ):
         """
         Delete labels in an index. All labels are deleted if no filters are passed.
