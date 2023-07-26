@@ -274,14 +274,15 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         return client
 
     def query_by_embedding(
-        self,
-        query_emb: np.ndarray,
-        filters: Optional[FilterType] = None,
-        top_k: int = 10,
-        index: Optional[str] = None,
-        return_embedding: Optional[bool] = None,
-        headers: Optional[Dict[str, str]] = None,
-        scale_score: bool = True,
+            self,
+            query_emb: np.ndarray,
+            filters: Optional[FilterType] = None,
+            top_k: int = 10,
+            index: Optional[str] = None,
+            return_embedding: Optional[bool] = None,
+            headers: Optional[Dict[str, str]] = None,
+            es_query: Optional[Dict[str, str]] = None,
+            scale_score: bool = True,
     ) -> List[Document]:
         """
         Find the document that is most similar to the provided `query_emb` by using a vector similarity metric.
@@ -357,6 +358,7 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         :param return_embedding: To return document embedding
         :param headers: Custom HTTP headers to pass to elasticsearch client (e.g. {'Authorization': 'Basic YWRtaW46cm9vdA=='})
                 Check out https://www.elastic.co/guide/en/elasticsearch/reference/current/http-clients.html for more information.
+        :param es_query: Custom Elasticsearch Query-emp
         :param scale_score: Whether to scale the similarity score to the unit interval (range of [0,1]).
                             If true (default) similarity scores (e.g. cosine or dot_product) which naturally have a different value range will be scaled to a range of [0,1], where 1 means extremely relevant.
                             Otherwise raw similarity scores (e.g. cosine or dot_product) will be used.
@@ -372,11 +374,11 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
             raise RuntimeError("Please specify arg `embedding_field` in ElasticsearchDocumentStore()")
 
         body = self._construct_dense_query_body(
-            query_emb=query_emb, filters=filters, top_k=top_k, return_embedding=return_embedding
+            query_emb=query_emb, filters=filters, top_k=top_k, return_embedding=return_embedding, es_query=es_query
         )
 
         try:
-            result = self.client.search(index=index, **body, headers=headers)["hits"]["hits"]
+            result = self.client.search(index=index, **body, request_timeout=300, headers=headers)["hits"]["hits"]
             if len(result) == 0:
                 count_documents = self.get_document_count(index=index, headers=headers)
                 if count_documents == 0:
@@ -400,7 +402,8 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         return documents
 
     def _construct_dense_query_body(
-        self, query_emb: np.ndarray, return_embedding: bool, filters: Optional[FilterType] = None, top_k: int = 10
+            self, query_emb: np.ndarray, return_embedding: bool, es_query: dict, filters: Optional[FilterType] = None,
+            top_k: int = 10
     ):
         body = {"size": top_k, "query": self._get_vector_similarity_query(query_emb, top_k)}
         if filters:
@@ -410,6 +413,12 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
             else:
                 body["query"]["script_score"]["query"]["bool"]["filter"]["bool"]["must"].append(filter_)
 
+        if es_query:
+            if body["query"]["script_score"]["query"] == {"match_all": {}}:
+                body["query"]["script_score"]["query"] = es_query["query"]
+            else:
+                body["query"]["script_score"]["query"]["bool"]["should"] = [es_query["query"]]
+            body["highlight"] = es_query["highlight"]
         excluded_fields = self._get_excluded_fields(return_embedding=return_embedding)
         if excluded_fields:
             body["_source"] = {"excludes": excluded_fields}
@@ -531,8 +540,8 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
 
             if self.embedding_field:
                 if (
-                    self.embedding_field in mapping["properties"]
-                    and mapping["properties"][self.embedding_field]["type"] != "dense_vector"
+                        self.embedding_field in mapping["properties"]
+                        and mapping["properties"][self.embedding_field]["type"] != "dense_vector"
                 ):
                     raise DocumentStoreError(
                         f"Update the document store to use a different name for the `embedding_field` parameter. "
