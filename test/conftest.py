@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import re
 from functools import wraps
+from unittest.mock import patch
 
 import requests_cache
 import responses
@@ -33,7 +34,6 @@ from haystack.nodes import (
     BaseSummarizer,
     BaseTranslator,
     DenseRetriever,
-    RAGenerator,
     FilterRetriever,
     BM25Retriever,
     TfidfRetriever,
@@ -77,6 +77,9 @@ META_FIELDS = [
 
 # Disable telemetry reports when running tests
 posthog.disabled = True
+
+# Disable caching from prompthub to avoid polluting the local environment.
+os.environ["PROMPTHUB_CACHE_ENABLED"] = "false"
 
 # Cache requests (e.g. huggingface model) to circumvent load protection
 # See https://requests-cache.readthedocs.io/en/stable/user_guide/filtering.html
@@ -398,9 +401,8 @@ class MockPromptNode(PromptNode):
 
     def get_prompt_template(self, prompt_template: Union[str, PromptTemplate, None]) -> Optional[PromptTemplate]:
         if prompt_template == "think-step-by-step":
-            return PromptTemplate(
-                name="think-step-by-step",
-                prompt_text="You are a helpful and knowledgeable agent. To achieve your goal of answering complex questions "
+            p = PromptTemplate(
+                "You are a helpful and knowledgeable agent. To achieve your goal of answering complex questions "
                 "correctly, you have access to the following tools:\n\n"
                 "{tool_names_with_descriptions}\n\n"
                 "To answer questions, you'll need to go through multiple steps involving step-by-step thinking and "
@@ -417,10 +419,11 @@ class MockPromptNode(PromptNode):
                 "Thought, Tool, Tool Input, and Observation steps can be repeated multiple times, but sometimes we can find an answer in the first pass\n"
                 "---\n\n"
                 "Question: {query}\n"
-                "Thought: Let's think step-by-step, I first need to {generated_text}",
+                "Thought: Let's think step-by-step, I first need to {generated_text}"
             )
+            p.name = "think-step-by-step"
         else:
-            return PromptTemplate(name="", prompt_text="")
+            return PromptTemplate("test prompt")
 
 
 @pytest.fixture
@@ -507,11 +510,6 @@ def deepset_cloud_fixture():
         )
     else:
         responses.add_passthru(DC_API_ENDPOINT)
-
-
-@pytest.fixture
-def rag_generator():
-    return RAGenerator(model_name_or_path="facebook/rag-token-nq", generator_type="token", max_length=20)
 
 
 @pytest.fixture
@@ -844,5 +842,14 @@ def request_blocker(request: pytest.FixtureRequest, monkeypatch):
     marker = request.node.get_closest_marker("unit")
     if marker is None:
         return
-    monkeypatch.delattr("requests.sessions.Session")
-    monkeypatch.delattr("requests_cache.session.CachedSession")
+
+    def urlopen_mock(self, method, url, *args, **kwargs):
+        raise RuntimeError(f"The test was about to {method} {self.scheme}://{self.host}{url}")
+
+    monkeypatch.setattr("urllib3.connectionpool.HTTPConnectionPool.urlopen", urlopen_mock)
+
+
+@pytest.fixture
+def mock_auto_tokenizer():
+    with patch("transformers.AutoTokenizer.from_pretrained", autospec=True) as mock_from_pretrained:
+        yield mock_from_pretrained

@@ -9,9 +9,9 @@ from haystack.nodes.prompt import PromptTemplate
 from haystack.utils.openai_utils import (
     load_openai_tokenizer,
     openai_request,
-    count_openai_tokens,
     _openai_text_completion_tokenization_details,
     _check_openai_finish_reason,
+    check_openai_policy_violation,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,8 @@ class OpenAIAnswerGenerator(BaseGenerator):
         progress_bar: bool = True,
         prompt_template: Optional[PromptTemplate] = None,
         context_join_str: str = " ",
+        moderate_content: bool = False,
+        api_base: str = "https://api.openai.com/v1",
     ):
         """
         :param api_key: Your API key from OpenAI. It is required for this node to work.
@@ -90,16 +92,19 @@ class OpenAIAnswerGenerator(BaseGenerator):
             If not supplied, the default prompt template is:
             ```python
                 PromptTemplate(
-                    name="question-answering-with-examples",
-                    prompt_text="Please answer the question according to the above context."
-                                "\n===\nContext: {examples_context}\n===\n{examples}\n\n"
-                                "===\nContext: {context}\n===\n{query}",
+                    "Please answer the question according to the above context."
+                    "\n===\nContext: {examples_context}\n===\n{examples}\n\n"
+                    "===\nContext: {context}\n===\n{query}",
                 )
             ```
-            To learn how variables, such as'{context}', are substituted in the `prompt_text`, see
+            To learn how variables, such as'{context}', are substituted in the prompt text, see
             [PromptTemplate](https://docs.haystack.deepset.ai/docs/prompt_node#template-structure).
         :param context_join_str: The separation string used to join the input documents to create the context
             used by the PromptTemplate.
+        :param moderate_content: Whether to filter input and generated answers for potentially sensitive content
+            using the [OpenAI Moderation API](https://platform.openai.com/docs/guides/moderation). If the input or
+            answers are flagged, an empty list is returned in place of the answers.
+        :param api_base: The base URL for the OpenAI API, defaults to `"https://api.openai.com/v1"`.
         """
         super().__init__(progress_bar=progress_bar)
         if (examples is None and examples_context is not None) or (examples is not None and examples_context is None):
@@ -115,10 +120,9 @@ class OpenAIAnswerGenerator(BaseGenerator):
             stop_words = ["\n", "<|endoftext|>"]
         if prompt_template is None:
             prompt_template = PromptTemplate(
-                name="question-answering-with-examples",
-                prompt_text="Please answer the question according to the above context."
+                "Please answer the question according to the above context."
                 "\n===\nContext: {examples_context}\n===\n{examples}\n\n"
-                "===\nContext: {context}\n===\n{query}",
+                "===\nContext: {context}\n===\n{query}"
             )
         else:
             # Check for required prompts
@@ -147,6 +151,7 @@ class OpenAIAnswerGenerator(BaseGenerator):
         self.azure_base_url = azure_base_url
         self.azure_deployment_name = azure_deployment_name
         self.api_version = api_version
+        self.api_base = api_base
         self.model = model
         self.max_tokens = max_tokens
         self.top_k = top_k
@@ -159,6 +164,7 @@ class OpenAIAnswerGenerator(BaseGenerator):
         self.prompt_template = prompt_template
         self.context_join_str = context_join_str
         self.using_azure = self.azure_deployment_name is not None and self.azure_base_url is not None
+        self.moderate_content = moderate_content
 
         tokenizer_name, max_tokens_limit = _openai_text_completion_tokenization_details(model_name=self.model)
 
@@ -220,7 +226,7 @@ class OpenAIAnswerGenerator(BaseGenerator):
         if self.using_azure:
             url = f"{self.azure_base_url}/openai/deployments/{self.azure_deployment_name}/completions?api-version={self.api_version}"
         else:
-            url = "https://api.openai.com/v1/completions"
+            url = f"{self.api_base}/completions"
 
         headers = {"Content-Type": "application/json"}
         if self.using_azure:
@@ -228,9 +234,19 @@ class OpenAIAnswerGenerator(BaseGenerator):
         else:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        if self.moderate_content and check_openai_policy_violation(input=prompt, headers=headers):
+            logger.info("Prompt '%s' will not be sent to OpenAI due to potential policy violation.", prompt)
+            return {"query": query, "answers": []}
+
+        logger.debug("Prompt being sent to OpenAI API with prompt %s.", prompt)
         res = openai_request(url=url, headers=headers, payload=payload, timeout=timeout)
         _check_openai_finish_reason(result=res, payload=payload)
         generated_answers = [ans["text"] for ans in res["choices"]]
+        if self.moderate_content and check_openai_policy_violation(input=generated_answers, headers=headers):
+            logger.info(
+                "Generated answers '%s' will not be returned due to potential policy violation.", generated_answers
+            )
+            return {"query": query, "answers": []}
         answers = self._create_answers(generated_answers, input_docs, prompt=prompt)
         result = {"query": query, "answers": answers}
         return result
@@ -265,7 +281,7 @@ class OpenAIAnswerGenerator(BaseGenerator):
         construct the context) are thrown away until the prompt length fits within the MAX_TOKENS_LIMIT.
         """
         full_prompt = self._fill_prompt(query, documents)
-        n_full_prompt_tokens = count_openai_tokens(text=full_prompt, tokenizer=self._tokenizer)
+        n_full_prompt_tokens = len(self._tokenizer.encode(full_prompt))
 
         # for length restrictions of prompt see: https://platform.openai.com/docs/api-reference/completions/create#completions/create-max_tokens
         leftover_token_len = self.MAX_TOKENS_LIMIT - n_full_prompt_tokens - self.max_tokens
@@ -279,7 +295,8 @@ class OpenAIAnswerGenerator(BaseGenerator):
             # Reversing the order of documents b/c we want to throw away less relevant docs first
             for doc in reversed(documents):
                 skipped_docs += 1
-                n_skipped_tokens += count_openai_tokens(text=doc.content, tokenizer=self._tokenizer)
+                n_skipped_tokens += len(self._tokenizer.encode(doc.content))
+
                 # Only skip enough tokens to fit within the MAX_TOKENS_LIMIT
                 if n_skipped_tokens >= abs(leftover_token_len):
                     break
@@ -287,7 +304,7 @@ class OpenAIAnswerGenerator(BaseGenerator):
             # Throw away least relevant docs
             input_docs = documents[:-skipped_docs]
             full_prompt = self._fill_prompt(query, input_docs)
-            n_full_prompt_tokens = count_openai_tokens(text=full_prompt, tokenizer=self._tokenizer)
+            n_full_prompt_tokens = len(self._tokenizer.encode(full_prompt))
 
             if len(input_docs) == 0:
                 logger.warning(

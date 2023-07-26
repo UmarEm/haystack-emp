@@ -1,30 +1,25 @@
-from typing import Any, Dict, Generator, List, Optional, Union
-
+import hashlib
+import json
+import logging
 import re
 import uuid
-import json
-import hashlib
-import logging
+from typing import Any, Dict, Generator, List, Optional, Union
 
 import numpy as np
 from tqdm.auto import tqdm
 
-try:
-    import weaviate
-    from weaviate import client, AuthClientPassword, gql, AuthClientCredentials, AuthBearerToken
-except (ImportError, ModuleNotFoundError) as ie:
-    from haystack.utils.import_utils import _optional_component_not_installed
-
-    _optional_component_not_installed(__name__, "weaviate", ie)
-
 from haystack.schema import Document, FilterType, Label
 from haystack.document_stores import KeywordDocumentStore
-from haystack.document_stores.base import get_batches_from_generator
+from haystack.utils.batching import get_batches_from_generator
 from haystack.document_stores.filter_utils import LogicalFilterClause
 from haystack.document_stores.utils import convert_date_to_rfc3339
 from haystack.errors import DocumentStoreError, HaystackError
 from haystack.nodes.retriever import DenseRetriever
+from haystack.lazy_imports import LazyImport
 
+with LazyImport("Run 'pip install farm-haystack[weaviate]'") as weaviate_import:
+    import weaviate
+    from weaviate import AuthApiKey, AuthBearerToken, AuthClientCredentials, AuthClientPassword, client, gql
 
 logger = logging.getLogger(__name__)
 UUID_PATTERN = re.compile(r"^[\da-f]{8}-([\da-f]{4}-){3}[\da-f]{12}$", re.IGNORECASE)
@@ -67,6 +62,13 @@ class WeaviateDocumentStore(KeywordDocumentStore):
     1. Start a Weaviate server (see https://weaviate.io/developers/weaviate/current/getting-started/installation.html)
     2. Init a WeaviateDocumentStore in Haystack
 
+    Connection Parameters Precedence:
+    The selection and priority of connection parameters are as follows:
+    1. If `use_embedded` is set to True, an embedded Weaviate instance will be used, and all other connection parameters will be ignored.
+    2. If `use_embedded` is False or not provided and an `api_key` is provided, the `api_key` will be used to authenticate through AuthApiKey, assuming a connection to a Weaviate Cloud Service (WCS) instance.
+    3. If neither `use_embedded` nor `api_key` is provided, but a `username` and `password` are provided, they will be used to authenticate through AuthClientPassword, assuming an OIDC Resource Owner Password flow.
+    4. If none of the above conditions are met, no authentication method will be used and a connection will be attempted with the provided `host` and `port` values without any authentication.
+
     Limitations:
     The current implementation is not supporting the storage of labels, so you cannot run any evaluation workflows.
     """
@@ -78,11 +80,10 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         timeout_config: tuple = (5, 15),
         username: Optional[str] = None,
         password: Optional[str] = None,
-        client_secret: Optional[str] = None,
         scope: Optional[str] = "offline_access",
-        access_token: Optional[str] = None,
-        expires_in: Optional[int] = 60,
-        refresh_token: Optional[str] = None,
+        api_key: Optional[str] = None,
+        use_embedded: bool = False,
+        embedded_options: Optional[dict] = None,
         additional_headers: Optional[Dict[str, Any]] = None,
         index: str = "Document",
         embedding_dim: int = 768,
@@ -97,6 +98,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         duplicate_documents: str = "overwrite",
         recreate_index: bool = False,
         replication_factor: int = 1,
+        batch_size: int = 10_000,
     ):
         """
         :param host: Weaviate server connection URL for storing and processing documents and vectors.
@@ -105,11 +107,10 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         :param timeout_config: The Weaviate timeout config as a tuple of (retries, time out seconds).
         :param username: The Weaviate username (standard authentication using http_auth).
         :param password: Weaviate password (standard authentication using http_auth).
-        :param client_secret: The client secret to use when using the OIDC Client Credentials authentication flow.
         :param scope: The scope of the credentials when using the OIDC Resource Owner Password or Client Credentials authentication flow.
-        :param access_token: Access token to use when using OIDC and bearer tokens to authenticate.
-        :param expires_in: The time in seconds after which the access token expires.
-        :param refresh_token: The refresh token to use when using OIDC and bearer tokens to authenticate.
+        :param api_key: The Weaviate Cloud Services (WCS) API key (for WCS authentication).
+        :param use_embedded: Whether to use an embedded Weaviate instance. Default: False.
+        :param embedded_options: Custom options for the embedded Weaviate instance. Default: None.
         :param additional_headers: Additional headers to be included in the requests sent to Weaviate, for example the bearer token.
         :param index: Index name for document text, embedding, and metadata (in Weaviate terminology, this is a "Class" in the Weaviate schema).
         :param embedding_dim: The embedding vector size. Default: 768.
@@ -138,17 +139,28 @@ class WeaviateDocumentStore(KeywordDocumentStore):
             lost if you choose to recreate the index.
         :param replication_factor: Sets the Weaviate Class's replication factor in Weaviate at the time of Class creation.
                                    See also [Weaviate documentation](https://weaviate.io/developers/weaviate/current/configuration/replication.html).
+        :param batch_size: The number of documents to index at once.
         """
+        weaviate_import.check()
         super().__init__()
 
         # Connect to Weaviate server using python binding
-        weaviate_url = f"{host}:{port}"
-        secret = self._get_auth_secret(
-            username, password, client_secret, access_token, expires_in, refresh_token, scope
-        )
+        if not use_embedded:
+            weaviate_url = f"{host}:{port}"
+            auth_client_secret = self._get_auth_secret(username, password, api_key, scope)
+            embedded_options = None
+        else:
+            weaviate_url = None
+            auth_client_secret = None
+            embedded_options = self._get_embedded_options(embedded_options)
+
+        # Timeout config can only be defined as a list in YAML, but Weaviate expects a tuple
+        if isinstance(timeout_config, list):
+            timeout_config = tuple(timeout_config)
         self.weaviate_client = client.Client(
             url=weaviate_url,
-            auth_client_secret=secret,
+            embedded_options=embedded_options,
+            auth_client_secret=auth_client_secret,
             timeout_config=timeout_config,
             additional_headers=additional_headers,
         )
@@ -186,6 +198,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         self.progress_bar = progress_bar
         self.duplicate_documents = duplicate_documents
         self.replication_factor = replication_factor
+        self.batch_size = batch_size
 
         self._create_schema_and_index(self.index, recreate_index=recreate_index)
         self.uuid_format_warning_raised = False
@@ -194,20 +207,19 @@ class WeaviateDocumentStore(KeywordDocumentStore):
     def _get_auth_secret(
         username: Optional[str] = None,
         password: Optional[str] = None,
-        client_secret: Optional[str] = None,
-        access_token: Optional[str] = None,
-        expires_in: Optional[int] = 60,
-        refresh_token: Optional[str] = None,
+        api_key: Optional[str] = None,
         scope: Optional[str] = "offline_access",
     ) -> Optional[Union["AuthClientPassword", "AuthClientCredentials", "AuthBearerToken"]]:
-        if username and password:
+        if api_key:
+            return AuthApiKey(api_key=api_key)
+        elif username and password:
             return AuthClientPassword(username, password, scope=scope)
-        elif client_secret:
-            return AuthClientCredentials(client_secret, scope=scope)
-        elif access_token:
-            return AuthBearerToken(access_token, expires_in=expires_in, refresh_token=refresh_token)
-
         return None
+
+    @staticmethod
+    def _get_embedded_options(embedded_options: Optional[Dict[str, Any]] = None) -> "weaviate.EmbeddedOptions":
+        embedded_options = embedded_options or {}
+        return weaviate.EmbeddedOptions(**embedded_options)
 
     def _sanitize_index_name(self, index: Optional[str]) -> Optional[str]:
         if index is None:
@@ -400,7 +412,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         self,
         ids: List[str],
         index: Optional[str] = None,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> List[Document]:
         """
@@ -410,6 +422,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
             raise NotImplementedError("WeaviateDocumentStore does not support headers.")
 
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
         # We retrieve the JSON properties from the schema and convert them back to the Python dicts
         json_properties = self._get_json_properties(index=index)
         documents = []
@@ -557,7 +570,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         self,
         documents: Union[List[dict], List[Document]],
         index: Optional[str] = None,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
         duplicate_documents: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
     ):
@@ -567,6 +580,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         :param documents: List of `Dicts` or List of `Documents`. A dummy embedding vector for each document is automatically generated if it is not provided. The document id needs to be in uuid format. Otherwise a correctly formatted uuid will be automatically generated based on the provided id.
         :param index: index name for storing the docs and metadata
         :param batch_size: When working with large number of documents, batching can help reduce memory footprint.
+                           If no batch_size is provided, self.batch_size is used.
         :param duplicate_documents: Handle duplicates document based on parameter options.
                                     Parameter options : ( 'skip','overwrite','fail')
                                     skip: Ignore the duplicates documents
@@ -580,6 +594,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
             raise NotImplementedError("WeaviateDocumentStore does not support headers.")
 
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
         self._create_schema_and_index(index, recreate_index=False)
         field_map = self._create_document_field_map()
 
@@ -764,7 +779,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         index: Optional[str] = None,
         filters: Optional[FilterType] = None,
         return_embedding: Optional[bool] = None,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> List[Document]:
         """
@@ -817,11 +832,13 @@ class WeaviateDocumentStore(KeywordDocumentStore):
                             ```
         :param return_embedding: Whether to return the document embeddings.
         :param batch_size: When working with large number of documents, batching can help reduce memory footprint.
+                           If no batch_size is provided, self.batch_size is used.
         """
         if headers:
             raise NotImplementedError("WeaviateDocumentStore does not support headers.")
 
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
         result = self.get_all_documents_generator(
             index=index, filters=filters, return_embedding=return_embedding, batch_size=batch_size
         )
@@ -832,13 +849,14 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         self,
         index: Optional[str],
         filters: Optional[FilterType] = None,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
         only_documents_without_embedding: bool = False,
     ) -> Generator[dict, None, None]:
         """
         Return all documents in a specific index in the document store
         """
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
 
         # Build the properties to retrieve from Weaviate
         properties = self._get_current_properties(index)
@@ -907,7 +925,7 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         index: Optional[str] = None,
         filters: Optional[FilterType] = None,
         return_embedding: Optional[bool] = None,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> Generator[Document, None, None]:
         """
@@ -962,11 +980,13 @@ class WeaviateDocumentStore(KeywordDocumentStore):
                             ```
         :param return_embedding: Whether to return the document embeddings.
         :param batch_size: When working with large number of documents, batching can help reduce memory footprint.
+                           If no batch_size is provided, self.batch_size is used.
         """
         if headers:
             raise NotImplementedError("WeaviateDocumentStore does not support headers.")
 
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
 
         if return_embedding is None:
             return_embedding = self.return_embedding
@@ -1418,11 +1438,11 @@ class WeaviateDocumentStore(KeywordDocumentStore):
         index: Optional[str] = None,
         filters: Optional[FilterType] = None,
         update_existing_embeddings: bool = True,
-        batch_size: int = 10_000,
+        batch_size: Optional[int] = None,
     ):
         """
-        Updates the embeddings in the the document store using the encoding model specified in the retriever.
-        This can be useful if want to change the embeddings for your documents (e.g. after changing the retriever config).
+        Updates the embeddings in the document store using the encoding model specified in the retriever.
+        This can be useful if you want to change the embeddings for your documents (e.g. after changing the retriever config).
 
         :param retriever: Retriever to use to update the embeddings.
         :param index: Index name to update
@@ -1456,9 +1476,11 @@ class WeaviateDocumentStore(KeywordDocumentStore):
                             }
                             ```
         :param batch_size: When working with large number of documents, batching can help reduce memory footprint.
+                           If no batch_size is specified, self.batch_size is used.
         :return: None
         """
         index = self._sanitize_index_name(index) or self.index
+        batch_size = batch_size or self.batch_size
 
         if not self.embedding_field:
             raise RuntimeError("Specify the arg `embedding_field` when initializing WeaviateDocumentStore()")

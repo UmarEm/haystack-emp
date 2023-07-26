@@ -112,6 +112,7 @@ jobs:
           - document_stores
           - nodes
           - agents
+          - cli
           - preview
           - prompt
           - pipelines
@@ -193,10 +194,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     services:
       elasticsearch:
-        image: elasticsearch:7.17.6
+        image: elasticsearch:8.7.1
         env:
           discovery.type: "single-node"
+          xpack.security.enabled: "false"
           ES_JAVA_OPTS: "-Xms128m -Xmx256m"
+          ELASTIC_CLIENT_APIVERSIONING: 1
         ports:
           - 9200:9200
     steps:
@@ -207,7 +210,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Haystack
-        run: pip install .[elasticsearch,dev,preprocessing]
+        run: pip install .[elasticsearch,dev,preprocessing,inference]
 
       - name: Run tests
         run: |
@@ -605,7 +608,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Haystack
-        run: pip install .[dev,preprocessing]
+        run: pip install .[dev,preprocessing,inference]
 
       - name: Run tests
         run: |
@@ -659,7 +662,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Haystack
-        run: pip install .[dev,preprocessing]
+        run: pip install .[dev,preprocessing,inference]
 
       - name: Run tests
         run: |
@@ -713,7 +716,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Haystack
-        run: pip install .[dev,preprocessing]
+        run: pip install .[dev,preprocessing,inference]
 
       - name: Run tests
         run: |

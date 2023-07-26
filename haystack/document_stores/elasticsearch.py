@@ -3,59 +3,57 @@ from typing import Dict, List, Optional, Type, Union
 
 import numpy as np
 
-try:
-    from elasticsearch import Connection, Elasticsearch, RequestsHttpConnection, Urllib3HttpConnection
-    from elasticsearch.helpers import bulk, scan
-    from elasticsearch.exceptions import RequestError
-except (ImportError, ModuleNotFoundError) as ie:
-    from haystack.utils.import_utils import _optional_component_not_installed
-
-    _optional_component_not_installed(__name__, "elasticsearch", ie)
-
 from haystack.errors import DocumentStoreError
 from haystack.schema import Document, FilterType
 from haystack.document_stores.filter_utils import LogicalFilterClause
-
+from haystack.lazy_imports import LazyImport
 from .search_engine import SearchEngineDocumentStore, prepare_hosts
+
+with LazyImport("Run 'pip install farm-haystack[elasticsearch]'") as es_import:
+    from elasticsearch import Connection, Elasticsearch, RequestsHttpConnection, Urllib3HttpConnection
+    from elasticsearch.helpers import bulk, scan
+    from elasticsearch.exceptions import RequestError
+
 
 logger = logging.getLogger(__name__)
 
 
 class ElasticsearchDocumentStore(SearchEngineDocumentStore):
     def __init__(
-            self,
-            host: Union[str, List[str]] = "localhost",
-            port: Union[int, List[int]] = 9200,
-            username: str = "",
-            password: str = "",
-            api_key_id: Optional[str] = None,
-            api_key: Optional[str] = None,
-            aws4auth=None,
-            index: str = "document",
-            label_index: str = "label",
-            search_fields: Union[str, list] = "content",
-            content_field: str = "content",
-            name_field: str = "name",
-            embedding_field: str = "embedding",
-            embedding_dim: int = 768,
-            custom_mapping: Optional[dict] = None,
-            excluded_meta_data: Optional[list] = None,
-            analyzer: str = "standard",
-            scheme: str = "http",
-            ca_certs: Optional[str] = None,
-            verify_certs: bool = True,
-            recreate_index: bool = False,
-            create_index: bool = True,
-            refresh_type: str = "wait_for",
-            similarity: str = "dot_product",
-            timeout: int = 30,
-            return_embedding: bool = False,
-            duplicate_documents: str = "overwrite",
-            scroll: str = "1d",
-            skip_missing_embeddings: bool = True,
-            synonyms: Optional[List] = None,
-            synonym_type: str = "synonym",
-            use_system_proxy: bool = False,
+        self,
+        host: Union[str, List[str]] = "localhost",
+        port: Union[int, List[int]] = 9200,
+        username: str = "",
+        password: str = "",
+        api_key_id: Optional[str] = None,
+        api_key: Optional[str] = None,
+        aws4auth=None,
+        index: str = "document",
+        label_index: str = "label",
+        search_fields: Union[str, list] = "content",
+        content_field: str = "content",
+        name_field: str = "name",
+        embedding_field: str = "embedding",
+        embedding_dim: int = 768,
+        custom_mapping: Optional[dict] = None,
+        excluded_meta_data: Optional[list] = None,
+        analyzer: str = "standard",
+        scheme: str = "http",
+        ca_certs: Optional[str] = None,
+        verify_certs: bool = True,
+        recreate_index: bool = False,
+        create_index: bool = True,
+        refresh_type: str = "wait_for",
+        similarity: str = "dot_product",
+        timeout: int = 300,
+        return_embedding: bool = False,
+        duplicate_documents: str = "overwrite",
+        scroll: str = "1d",
+        skip_missing_embeddings: bool = True,
+        synonyms: Optional[List] = None,
+        synonym_type: str = "synonym",
+        use_system_proxy: bool = False,
+        batch_size: int = 10_000,
     ):
         """
         A DocumentStore using Elasticsearch to store and query the documents for our search.
@@ -127,8 +125,12 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
                              Synonym or Synonym_graph to handle synonyms, including multi-word synonyms correctly during the analysis process.
                              More info at https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis-synonym-graph-tokenfilter.html
         :param use_system_proxy: Whether to use system proxy.
+        :param batch_size: Number of Documents to index at once / Number of queries to execute at once. If you face
+                           memory issues, decrease the batch_size.
 
         """
+        es_import.check()
+
         # Base constructor might need the client to be ready, create it first
         client = self._init_elastic_client(
             host=host,
@@ -167,6 +169,7 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
             skip_missing_embeddings=skip_missing_embeddings,
             synonyms=synonyms,
             synonym_type=synonym_type,
+            batch_size=batch_size,
         )
 
         # Let the base class trap the right exception from the elasticpy client
@@ -182,20 +185,20 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
 
     @classmethod
     def _init_elastic_client(
-            cls,
-            host: Union[str, List[str]],
-            port: Union[int, List[int]],
-            username: str,
-            password: str,
-            api_key_id: Optional[str],
-            api_key: Optional[str],
-            aws4auth,
-            scheme: str,
-            ca_certs: Optional[str],
-            verify_certs: bool,
-            timeout: int,
-            use_system_proxy: bool,
-    ) -> Elasticsearch:
+        cls,
+        host: Union[str, List[str]],
+        port: Union[int, List[int]],
+        username: str,
+        password: str,
+        api_key_id: Optional[str],
+        api_key: Optional[str],
+        aws4auth,
+        scheme: str,
+        ca_certs: Optional[str],
+        verify_certs: bool,
+        timeout: int,
+        use_system_proxy: bool,
+    ) -> "Elasticsearch":
         hosts = prepare_hosts(host, port)
 
         if (api_key or api_key_id) and not (api_key and api_key_id):
@@ -271,15 +274,14 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         return client
 
     def query_by_embedding(
-            self,
-            query_emb: np.ndarray,
-            filters: Optional[FilterType] = None,
-            top_k: int = 10,
-            index: Optional[str] = None,
-            return_embedding: Optional[bool] = None,
-            headers: Optional[Dict[str, str]] = None,
-            es_query: Optional[Dict[str, str]] = None,
-            scale_score: bool = True,
+        self,
+        query_emb: np.ndarray,
+        filters: Optional[FilterType] = None,
+        top_k: int = 10,
+        index: Optional[str] = None,
+        return_embedding: Optional[bool] = None,
+        headers: Optional[Dict[str, str]] = None,
+        scale_score: bool = True,
     ) -> List[Document]:
         """
         Find the document that is most similar to the provided `query_emb` by using a vector similarity metric.
@@ -355,7 +357,6 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         :param return_embedding: To return document embedding
         :param headers: Custom HTTP headers to pass to elasticsearch client (e.g. {'Authorization': 'Basic YWRtaW46cm9vdA=='})
                 Check out https://www.elastic.co/guide/en/elasticsearch/reference/current/http-clients.html for more information.
-        :param es_query: Custom Elasticsearch Query-emp
         :param scale_score: Whether to scale the similarity score to the unit interval (range of [0,1]).
                             If true (default) similarity scores (e.g. cosine or dot_product) which naturally have a different value range will be scaled to a range of [0,1], where 1 means extremely relevant.
                             Otherwise raw similarity scores (e.g. cosine or dot_product) will be used.
@@ -371,11 +372,11 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
             raise RuntimeError("Please specify arg `embedding_field` in ElasticsearchDocumentStore()")
 
         body = self._construct_dense_query_body(
-            query_emb=query_emb, filters=filters, top_k=top_k, return_embedding=return_embedding, es_query=es_query
+            query_emb=query_emb, filters=filters, top_k=top_k, return_embedding=return_embedding
         )
 
         try:
-            result = self.client.search(index=index, **body, request_timeout=300, headers=headers)["hits"]["hits"]
+            result = self.client.search(index=index, **body, headers=headers)["hits"]["hits"]
             if len(result) == 0:
                 count_documents = self.get_document_count(index=index, headers=headers)
                 if count_documents == 0:
@@ -399,8 +400,7 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
         return documents
 
     def _construct_dense_query_body(
-            self, query_emb: np.ndarray, return_embedding: bool, es_query: dict, filters: Optional[FilterType] = None,
-            top_k: int = 10
+        self, query_emb: np.ndarray, return_embedding: bool, filters: Optional[FilterType] = None, top_k: int = 10
     ):
         body = {"size": top_k, "query": self._get_vector_similarity_query(query_emb, top_k)}
         if filters:
@@ -410,12 +410,6 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
             else:
                 body["query"]["script_score"]["query"]["bool"]["filter"]["bool"]["must"].append(filter_)
 
-        if es_query:
-            if body["query"]["script_score"]["query"] == {"match_all": {}}:
-                body["query"]["script_score"]["query"] = es_query["query"]
-            else:
-                body["query"]["script_score"]["query"]["bool"]["should"] = [es_query["query"]]
-            body["highlight"] = es_query["highlight"]
         excluded_fields = self._get_excluded_fields(return_embedding=return_embedding)
         if excluded_fields:
             body["_source"] = {"excludes": excluded_fields}
@@ -537,8 +531,8 @@ class ElasticsearchDocumentStore(SearchEngineDocumentStore):
 
             if self.embedding_field:
                 if (
-                        self.embedding_field in mapping["properties"]
-                        and mapping["properties"][self.embedding_field]["type"] != "dense_vector"
+                    self.embedding_field in mapping["properties"]
+                    and mapping["properties"][self.embedding_field]["type"] != "dense_vector"
                 ):
                     raise DocumentStoreError(
                         f"Update the document store to use a different name for the `embedding_field` parameter. "
